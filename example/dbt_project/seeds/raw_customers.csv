@@ -1,0 +1,8 @@
+source_row_id,scenario,customer_id,email,age,country_code,customer_name
+1,pass,C001,ada@example.com,36,DE,Ada Lovelace
+2,pass,C002,grace@example.com,41,US,Grace Hopper
+3,pass,C003,katherine@example.com,32,GB,Katherine Johnson
+4,warn,C101,maria@example.com,29,Germany,Maria Reiche
+5,warn,C102,radia@example.com,38,US,Radia Perlman
+6,block,C201,not-an-email,34,DE,Emmy Noether
+7,block,C202,lise@example.com,44,AT,Lise Meitner

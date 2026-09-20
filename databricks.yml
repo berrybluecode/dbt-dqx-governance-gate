@@ -1,0 +1,25 @@
+bundle:
+  name: dbt-dqx-governance-gate
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that stores the demo and DQX control plane
+    default: main
+  schema:
+    description: Unity Catalog schema for the demo
+    default: dbt_dqx_demo
+
+workspace:
+  root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+targets:
+  dev:
+    default: true
+    mode: development
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}

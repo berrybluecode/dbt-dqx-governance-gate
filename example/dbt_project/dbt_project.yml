@@ -1,0 +1,22 @@
+name: dbt_dqx_demo
+version: "1.0.0"
+config-version: 2
+
+profile: dbt_dqx_demo
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+vars:
+  scenario: pass
+
+models:
+  dbt_dqx_demo:
+    +materialized: table
+    +catalog: "{{ env_var('DBT_DQX_CATALOG', 'main') }}"
+
+seeds:
+  dbt_dqx_demo:
+    +catalog: "{{ env_var('DBT_DQX_CATALOG', 'main') }}"

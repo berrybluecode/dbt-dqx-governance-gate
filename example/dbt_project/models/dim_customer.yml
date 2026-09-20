@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: "Customer dimension with native dbt tests and centrally managed DQX controls."
+    columns:
+      - name: customer_id
+        description: "Stable business identifier."
+        data_tests:
+          - not_null
+          - unique
+      - name: customer_name
+        data_tests:
+          - not_null

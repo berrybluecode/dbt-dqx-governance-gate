@@ -1,0 +1,14 @@
+.venv/
+.databricks/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+**/.user.yml
+
+example/dbt_project/target/
+example/dbt_project/logs/
+example/dbt_project/dbt_packages/

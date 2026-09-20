@@ -1,0 +1,45 @@
+resources:
+  jobs:
+    setup_dqx_registry:
+      name: "[${bundle.target}] dbt + DQX registry setup"
+      description: "Creates the Delta-backed rule registry and saves example governed controls."
+      tasks:
+        - task_key: save_example_rules
+          notebook_task:
+            notebook_path: ../src/dqx/setup_rules.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          environment_key: dqx_environment
+      environments:
+        - environment_key: dqx_environment
+          spec:
+            client: "4"
+            dependencies:
+              - databricks-labs-dqx==0.16.0
+
+    dqx_governance_gate:
+      name: "[${bundle.target}] dbt artifact-driven DQX gate"
+      description: "Runs centrally managed DQX controls for successful models found in dbt artifacts."
+      parameters:
+        - name: models_b64
+          default: W10=
+        - name: invocation_id
+          default: manual
+      tasks:
+        - task_key: evaluate_governed_controls
+          notebook_task:
+            notebook_path: ../src/dqx/run_gate.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              models_b64: "{{job.parameters.models_b64}}"
+              invocation_id: "{{job.parameters.invocation_id}}"
+              job_run_id: "{{job.run_id}}"
+          environment_key: dqx_environment
+      environments:
+        - environment_key: dqx_environment
+          spec:
+            client: "4"
+            dependencies:
+              - databricks-labs-dqx==0.16.0
