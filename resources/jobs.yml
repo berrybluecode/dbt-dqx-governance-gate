@@ -26,13 +26,17 @@ resources:
           default: W10=
         - name: invocation_id
           default: manual
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
       tasks:
         - task_key: evaluate_governed_controls
           notebook_task:
             notebook_path: ../src/dqx/run_gate.py
             base_parameters:
-              catalog: ${var.catalog}
-              schema: ${var.schema}
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
               models_b64: "{{job.parameters.models_b64}}"
               invocation_id: "{{job.parameters.invocation_id}}"
               job_run_id: "{{job.run_id}}"

@@ -9,6 +9,14 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
+def test_warehouse_id_is_derived_from_dbt_http_path():
+    assert (
+        runner.warehouse_id_from_http_path("/sql/1.0/warehouses/abc123")
+        == "abc123"
+    )
+    assert runner.warehouse_id_from_http_path(None) is None
+
+
 def test_successful_models_only_returns_materialized_successes():
     manifest = {
         "nodes": {

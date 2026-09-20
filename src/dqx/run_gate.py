@@ -91,6 +91,14 @@ for model in models:
               AND _dq_dbt_unique_id = '{unique_id}'
             """
         )
+    if spark.catalog.tableExists(metrics_table):
+        observer_name = f"{unique_id}:{invocation_id}"
+        spark.sql(
+            f"""
+            DELETE FROM {metrics_table}
+            WHERE run_name = '{observer_name}'
+            """
+        )
 
     observer = DQMetricsObserver(name=f"{unique_id}:{invocation_id}")
     engine = DQEngine(workspace_client, observer=observer)

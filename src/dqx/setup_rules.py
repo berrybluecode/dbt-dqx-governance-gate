@@ -6,6 +6,8 @@ publish the same DQX check payloads. This notebook keeps the repository
 self-contained and makes the registry contract explicit.
 """
 
+import re
+
 from databricks.labs.dqx.config import TableChecksStorageConfig
 from databricks.labs.dqx.engine import DQEngine
 from databricks.sdk import WorkspaceClient
@@ -16,6 +18,10 @@ dbutils.widgets.text("schema", "dbt_dqx_demo")
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
+identifier = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+if not identifier.fullmatch(catalog) or not identifier.fullmatch(schema):
+    raise ValueError("catalog and schema must contain only letters, digits, and underscores")
+
 checks_table = f"{catalog}.{schema}.dqx_rules"
 gate_runs_table = f"{catalog}.{schema}.governance_gate_runs"
 

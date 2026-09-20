@@ -68,7 +68,7 @@ of this runtime repository.
 - Databricks CLI with Asset Bundle support
 - a Databricks workspace with Unity Catalog
 - permission to create a schema and Delta tables
-- serverless jobs, or an equivalent job environment configured for DQX
+- Databricks serverless jobs
 - a SQL warehouse for dbt and result lookup
 
 ## Quick start
@@ -100,11 +100,21 @@ source .env
 set +a
 ```
 
+`DBT_DQX_CATALOG` and `DBT_DQX_SCHEMA` currently accept letters, digits and
+underscores. `DATABRICKS_WAREHOUSE_ID` is optional when
+`DATABRICKS_HTTP_PATH` ends in `/warehouses/<warehouse-id>`; the runner derives
+it automatically.
+
 Authenticate the Databricks CLI using OAuth:
 
 ```bash
 databricks auth login --host "$DATABRICKS_HOST"
 ```
+
+This login authenticates the Databricks CLI and Asset Bundle. The example dbt
+profile uses `auth_type: oauth`; dbt may open its own browser authorization
+the first time it connects. Remove any stale `DATABRICKS_TOKEN` if OAuth
+reports conflicting credentials.
 
 No token or workspace-specific identifier should be committed to this
 repository.
@@ -166,14 +176,15 @@ email-format policy.
 Example gate output:
 
 ```text
-1 of 3 PASS dqx_customer_id_required_on_dim_customer ........ [PASS]
-2 of 3 FAIL dqx_email_format_valid_on_dim_customer .......... [FAIL 1]
-3 of 3 PASS dqx_country_code_iso2_on_dim_customer ........... [PASS]
+08:26:38  1 of 3 PASS dqx_customer_id_required_on_dim_customer ....... [PASS]
+08:26:38  2 of 3 FAIL dqx_email_format_valid_on_dim_customer ........ [FAIL 1]
+08:26:38  3 of 3 PASS dqx_country_code_iso2_on_dim_customer ......... [PASS]
 
 Failure in governance control email_format_valid on dim_customer
   Got 1 violating row(s) of 2.
 
-Done. PASS=2 WARN=0 ERROR=1 SKIP=0 TOTAL=3
+08:26:38  Finished running 3 governance control(s) in 160.32s.
+08:26:38  Done. PASS=2 WARN=0 ERROR=1 SKIP=0 TOTAL=3
 ```
 
 Set `NO_COLOR=1` for plain output. Add `--verbose-gate` to stream raw
@@ -190,6 +201,11 @@ dbt build --select "$DBT_SELECTOR"
 Then add one central step:
 
 ```bash
+# Required once in the shared CI environment:
+export DBT_DQX_CATALOG=main
+export DBT_DQX_SCHEMA=dbt_dqx_demo
+export DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/your-warehouse-id
+
 python /path/to/run_dbt_with_dqx.py \
   --artifacts-only \
   --project-dir "$DBT_PROJECT_DIR"

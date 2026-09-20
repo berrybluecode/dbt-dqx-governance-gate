@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROJECT_DIR = ROOT / "example" / "dbt_project"
+
+
+def warehouse_id_from_http_path(http_path: str | None) -> str | None:
+    if not http_path:
+        return None
+    match = re.search(r"/warehouses/([^/]+)$", http_path.rstrip("/"))
+    return match.group(1) if match else None
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -98,13 +106,18 @@ def run_sql(
         text=True,
     )
     if completed.returncode:
-        return []
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"Databricks SQL request failed: {detail}")
     try:
         body = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        return []
-    if body.get("status", {}).get("state") != "SUCCEEDED":
-        return []
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Databricks SQL returned a non-JSON response") from exc
+    state = body.get("status", {}).get("state")
+    if state != "SUCCEEDED":
+        error = body.get("status", {}).get("error", {})
+        raise RuntimeError(
+            f"Databricks SQL statement did not succeed (state={state}): {error}"
+        )
     columns = [column["name"] for column in body["manifest"]["schema"]["columns"]]
     rows = body.get("result", {}).get("data_array", []) or []
     return [dict(zip(columns, row)) for row in rows]
@@ -181,7 +194,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project-dir", type=Path, default=DEFAULT_PROJECT_DIR)
     parser.add_argument("--catalog", default=os.getenv("DBT_DQX_CATALOG", "main"))
     parser.add_argument("--schema", default=os.getenv("DBT_DQX_SCHEMA", "dbt_dqx_demo"))
-    parser.add_argument("--warehouse-id", default=os.getenv("DATABRICKS_WAREHOUSE_ID"))
+    parser.add_argument(
+        "--warehouse-id",
+        default=(
+            os.getenv("DATABRICKS_WAREHOUSE_ID")
+            or warehouse_id_from_http_path(os.getenv("DATABRICKS_HTTP_PATH"))
+        ),
+    )
     parser.add_argument("--skip-seed", action="store_true")
     parser.add_argument(
         "--artifacts-only",
@@ -246,7 +265,10 @@ def main() -> int:
     payload = base64.b64encode(
         json.dumps(models, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
-    params = f"models_b64={payload},invocation_id={invocation_id}"
+    params = (
+        f"models_b64={payload},invocation_id={invocation_id},"
+        f"catalog={args.catalog},schema={args.schema}"
+    )
 
     print("\nENTERPRISE DQX GATE")
     print(f"  submitting {len(models)} executed model(s)")
@@ -280,13 +302,18 @@ def main() -> int:
     gate_runs_table = f"{args.catalog}.{args.schema}.governance_gate_runs"
     metrics_table = f"{args.catalog}.{args.schema}.dqx_metrics"
     escaped_invocation = invocation_id.replace("'", "''")
-    rows = run_sql(
-        f"SELECT dbt_unique_id, input_row_count FROM {gate_runs_table} "
-        f"WHERE invocation_id = '{escaped_invocation}'",
-        databricks=databricks,
-        warehouse_id=args.warehouse_id,
-        env=env,
-    )
+    try:
+        rows = run_sql(
+            f"SELECT dbt_unique_id, input_row_count FROM {gate_runs_table} "
+            f"WHERE invocation_id = '{escaped_invocation}'",
+            databricks=databricks,
+            warehouse_id=args.warehouse_id,
+            env=env,
+        )
+    except RuntimeError as exc:
+        print(f"\nCould not read DQX results: {exc}")
+        print("Verify the SQL warehouse ID, permissions, catalog, and schema.")
+        return 2
     if not rows and completed.returncode == 0:
         print("\nNo centrally governed controls applied to the selected models.")
         print(
@@ -304,14 +331,19 @@ def main() -> int:
     for row in rows:
         unique_id = row["dbt_unique_id"]
         model_name = unique_id.split(".")[-1]
-        controls = governance_controls(
-            metrics_table,
-            unique_id,
-            invocation_id,
-            databricks=databricks,
-            warehouse_id=args.warehouse_id,
-            env=env,
-        )
+        try:
+            controls = governance_controls(
+                metrics_table,
+                unique_id,
+                invocation_id,
+                databricks=databricks,
+                warehouse_id=args.warehouse_id,
+                env=env,
+            )
+        except RuntimeError as exc:
+            print(f"\nCould not read DQX control metrics: {exc}")
+            print("Verify the SQL warehouse ID, permissions, catalog, and schema.")
+            return 2
         for control in controls:
             errors = int(control.get("error_count", 0))
             warnings = int(control.get("warning_count", 0))
