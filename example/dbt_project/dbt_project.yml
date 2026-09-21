@@ -6,11 +6,16 @@ profile: dbt_dqx_demo
 
 model-paths: ["models"]
 seed-paths: ["seeds"]
+macro-paths: ["macros"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages", "logs"]
 
+on-run-end:
+  - "{{ run_dqx_governance_gate(results) }}"
+
 vars:
   scenario: pass
+  dqx_gate_enabled: "{{ env_var('DBT_DQX_GATE_ENABLED', 'false') }}"
 
 models:
   dbt_dqx_demo:

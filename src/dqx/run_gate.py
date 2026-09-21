@@ -69,6 +69,22 @@ gate_run_schema = StructType(
     ]
 )
 
+
+def upsert_gate_summary(summary):
+    summary_df = spark.createDataFrame([summary], gate_run_schema)
+    summary_df.createOrReplaceTempView("_dqx_gate_summary")
+    spark.sql(
+        f"""
+        MERGE INTO {gate_runs_table} AS target
+        USING _dqx_gate_summary AS source
+          ON target.invocation_id = source.invocation_id
+         AND target.dbt_unique_id = source.dbt_unique_id
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+        """
+    )
+
+
 summaries = []
 deferred_failure = None
 
@@ -110,6 +126,30 @@ for model in models:
     )
 
     if not checks:
+        summary = (
+            invocation_id,
+            job_run_id,
+            unique_id,
+            relation_name,
+            "SKIP",
+            0,
+            0,
+            0,
+            0,
+            datetime.now(timezone.utc),
+        )
+        upsert_gate_summary(summary)
+        summaries.append(
+            {
+                "unique_id": unique_id,
+                "relation_name": relation_name,
+                "status": "SKIP",
+                "input_row_count": 0,
+                "error_row_count": 0,
+                "warning_row_count": 0,
+                "rule_count": 0,
+            }
+        )
         print(f"SKIP {unique_id}: no centrally governed checks")
         continue
 
@@ -165,18 +205,7 @@ for model in models:
         len(checks),
         datetime.now(timezone.utc),
     )
-    summary_df = spark.createDataFrame([summary], gate_run_schema)
-    summary_df.createOrReplaceTempView("_dqx_gate_summary")
-    spark.sql(
-        f"""
-        MERGE INTO {gate_runs_table} AS target
-        USING _dqx_gate_summary AS source
-          ON target.invocation_id = source.invocation_id
-         AND target.dbt_unique_id = source.dbt_unique_id
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
-        """
-    )
+    upsert_gate_summary(summary)
 
     summaries.append(
         {

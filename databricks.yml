@@ -11,6 +11,12 @@ variables:
   schema:
     description: Unity Catalog schema for the demo
     default: dbt_dqx_demo
+  orchestration_token_scope:
+    description: Databricks secret scope containing the Jobs API credential
+    default: dqx-governance-gate
+  orchestration_token_key:
+    description: Secret key containing the Jobs API token
+    default: jobs-api-token
 
 workspace:
   root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

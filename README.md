@@ -25,14 +25,14 @@ developer-friendly result.
 ```text
 existing dbt build/test
         |
-        +-- manifest.json
-        +-- run_results.json
+        +-- on-run-end macro selects successful/tested models
                   |
                   v
-shared Python integration
+Unity Catalog SQL function
         |
-        +-- selects models that actually succeeded
+        +-- securely reads the Jobs API credential
         +-- submits model unique_id + relation to one DQX job
+        +-- waits synchronously for completion
                   |
                   v
 Delta-backed DQX registry --> DQX evaluation
@@ -45,15 +45,17 @@ Delta-backed DQX registry --> DQX evaluation
                                   dbt-style CI output + exit code
 ```
 
-Native `dbt test` does **not** run the Python DQX engine internally. The
-shared workflow runs dbt first and then invokes DQX synchronously from dbt's
-artifacts. That boundary is intentional: it keeps dbt native and DQX native.
+`dbt test` does not embed the DQX engine. Its `on-run-end` hook calls a
+Unity Catalog SQL wrapper around a Python UDF, which invokes the reusable DQX
+job and waits for it. This keeps both runtimes native while giving analytics
+engineers one command and one result.
 
 ## Included
 
 - a Databricks Asset Bundle with a registry setup job and reusable DQX gate
 - a Delta-backed DQX rule registry
 - idempotent summary and quarantine writes for job retries
+- a secure SQL/Python orchestration function and dbt `on-run-end` macro
 - dbt artifact parsing for model selection
 - concise, colored, dbt-style PASS/WARN/FAIL output
 - a small dbt project with pass, warning and blocking scenarios
@@ -68,8 +70,9 @@ of this runtime repository.
 - Databricks CLI with Asset Bundle support
 - a Databricks workspace with Unity Catalog
 - permission to create a schema and Delta tables
+- permission to create Unity Catalog functions and a Databricks secret scope
 - Databricks serverless jobs
-- a SQL warehouse for dbt and result lookup
+- a Pro or Serverless SQL warehouse that supports Unity Catalog Python UDFs
 
 ## Quick start
 
@@ -119,7 +122,24 @@ reports conflicting credentials.
 No token or workspace-specific identifier should be committed to this
 repository.
 
-### 3. Validate and deploy
+### 3. Store the orchestration credential
+
+Create a workspace secret scope and store a short-lived token for a dedicated
+service principal that can run and read the DQX job. For a local demo, a
+short-lived user token is sufficient:
+
+```bash
+databricks secrets create-scope dqx-governance-gate
+read -s DQX_JOBS_API_TOKEN
+databricks secrets put-secret dqx-governance-gate jobs-api-token \
+  --string-value "$DQX_JOBS_API_TOKEN"
+unset DQX_JOBS_API_TOKEN
+```
+
+The setup job creates an owner-authorized SQL wrapper, so dbt users need
+`EXECUTE` on `run_dqx_gate`, not direct access to the secret.
+
+### 4. Validate and deploy
 
 Choose a Unity Catalog catalog where you can create the demo schema:
 
@@ -131,18 +151,49 @@ databricks bundle deploy -t dev \
   --var="catalog=$DBT_DQX_CATALOG,schema=$DBT_DQX_SCHEMA"
 ```
 
-### 4. Create the registry and example rules
+### 5. Create the registry, rules, and SQL functions
 
 ```bash
 databricks bundle run setup_dqx_registry -t dev \
   --var="catalog=$DBT_DQX_CATALOG,schema=$DBT_DQX_SCHEMA"
 ```
 
-`src/dqx/setup_rules.py` is a self-contained publisher for the example. In a
+`src/dqx/setup_rules.py` publishes the example rules.
+`src/dqx/setup_orchestration.py` creates the secure SQL/Python functions. In a
 larger implementation, DQX Studio or another governance service can publish
 the same native DQX payloads into the Delta-backed registry.
 
-### 5. Run the scenarios
+### 6. Run with native dbt
+
+The example project already contains the hook. Enable it and use normal dbt:
+
+```bash
+export DBT_DQX_GATE_ENABLED=true
+
+dbt build \
+  --project-dir example/dbt_project \
+  --profiles-dir example/dbt_project \
+  --vars '{scenario: pass}'
+```
+
+For a standalone `dbt test`, first materialize the desired demo data, then run
+the familiar test command:
+
+```bash
+DBT_DQX_GATE_ENABLED=false dbt run \
+  --project-dir example/dbt_project \
+  --profiles-dir example/dbt_project \
+  --vars '{scenario: warn}'
+
+dbt test \
+  --project-dir example/dbt_project \
+  --profiles-dir example/dbt_project
+```
+
+PASS and WARN leave dbt successful. BLOCK returns a normal failing dbt hook
+with the failed control name and a non-zero exit code.
+
+### 7. Optional wrapper-script scenarios
 
 Put the virtual environment on `PATH` so the runner finds dbt:
 
@@ -192,30 +243,26 @@ Databricks job output for debugging.
 
 ## Add the gate to an existing dbt pipeline
 
-Keep the team's existing dbt step:
+Install or copy `macros/dqx_on_run_end.sql`, then add one project-level hook:
+
+```yaml
+on-run-end:
+  - "{{ run_dqx_governance_gate(results) }}"
+```
+
+The team's command remains unchanged:
 
 ```bash
+export DBT_DQX_GATE_ENABLED=true
 dbt build --select "$DBT_SELECTOR"
 ```
 
-Then add one central step:
+The macro reads dbt's in-memory `results` and graph. After `dbt build`, it
+selects successful materialized models. After `dbt test`, it resolves the
+tested parent models from test dependencies. No model SQL or test YAML changes.
 
-```bash
-# Required once in the shared CI environment:
-export DBT_DQX_CATALOG=main
-export DBT_DQX_SCHEMA=dbt_dqx_demo
-export DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/your-warehouse-id
-
-python /path/to/run_dbt_with_dqx.py \
-  --artifacts-only \
-  --project-dir "$DBT_PROJECT_DIR"
-```
-
-The integration reads `target/manifest.json` and `target/run_results.json`.
-After `dbt build`, it selects successful materialized models directly. After a
-standalone successful `dbt test`, it resolves the tested parent models from
-each test node's dependencies. Teams already consuming a shared CI template
-do not need repository-by-repository model or test changes.
+`scripts/run_dbt_with_dqx.py --artifacts-only` remains available for
+environments that cannot run Unity Catalog Python UDFs.
 
 ## Delta outputs
 
@@ -246,9 +293,10 @@ production considerations.
 ├── resources/jobs.yml
 ├── src/dqx/
 │   ├── setup_rules.py
+│   ├── setup_orchestration.py
 │   └── run_gate.py
 ├── scripts/run_dbt_with_dqx.py
-├── example/dbt_project/
+├── example/dbt_project/macros/dqx_on_run_end.sql
 ├── tests/
 └── docs/architecture.md
 ```

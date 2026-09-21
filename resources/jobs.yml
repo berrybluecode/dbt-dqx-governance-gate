@@ -11,6 +11,19 @@ resources:
               catalog: ${var.catalog}
               schema: ${var.schema}
           environment_key: dqx_environment
+        - task_key: create_dbt_hook_function
+          depends_on:
+            - task_key: save_example_rules
+          notebook_task:
+            notebook_path: ../src/dqx/setup_orchestration.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              workspace_host: ${workspace.host}
+              gate_job_id: ${resources.jobs.dqx_governance_gate.id}
+              token_scope: ${var.orchestration_token_scope}
+              token_key: ${var.orchestration_token_key}
+          environment_key: dqx_environment
       environments:
         - environment_key: dqx_environment
           spec:

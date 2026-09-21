@@ -8,21 +8,25 @@ the boundary explicit:
 ```text
 dbt build/test
     |
-    +-- target/manifest.json
-    +-- target/run_results.json
+    +-- on-run-end results + graph
               |
               v
-shared governance gate
+Unity Catalog run_dqx_gate SQL function
     |
-    +-- select successful models
+    +-- owner-authorized access to the Jobs API secret
+    +-- idempotent submission and synchronous polling
+              |
+              v
+reusable Databricks DQX job
+    |
     +-- resolve checks by dbt unique_id
-    +-- run a reusable Databricks DQX job
     +-- write metrics, quarantine rows and summaries
     +-- return PASS / WARN / non-zero BLOCK
 ```
 
-This gives developers one CI workflow and familiar test-style output without
-embedding PySpark orchestration in a dbt macro or generic SQL test.
+The macro contains selection and presentation logic only. DQX still executes
+as PySpark in its own job. The SQL warehouse function is an orchestration
+bridge, not a row-level data-quality UDF.
 
 ## Which rule goes where?
 
